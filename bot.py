@@ -1,157 +1,142 @@
 import os
 import logging
-import requests
+import aiohttp
 from flask import Flask, request
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
-    ContextTypes, filters
+    ContextTypes, filters, CallbackQueryHandler
 )
 
-# Configuration
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-VT_API_KEY = os.getenv("VT_API_KEY")
-CHANNEL_USERNAME = "@deku225"  # utilisé pour l'invitation au canal
+# Configurations
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+VT_API_KEY = os.environ.get("VT_API_KEY")
 ADMIN_ID = 1299831974
+CHANNEL_USERNAME = "@deku225channel"
+CHANNEL_ID = "-1002261675803"  # à adapter si besoin
 
-# Set up logging
+app = Flask(__name__)
+users = set()
+
+# Log
 logging.basicConfig(level=logging.INFO)
 
-# Base de données temporaire en mémoire
-users = set()
-scan_history = []
-
-# Bot setup
-app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-# Flask admin interface
-web = Flask(__name__)
-
-@web.route("/")
-def index():
-    return "Bot Telegram - Interface Web"
-
-@web.route("/admin/send", methods=["POST"])
-def admin_send():
-    msg = request.form.get("message", "")
-    for uid in users:
-        try:
-            app.bot.send_message(chat_id=uid, text=msg)
-        except:
-            pass
-    return "Message envoyé à tous les utilisateurs."
-
-@web.route("/admin/stats")
-def admin_stats():
-    return {
-        "total_users": len(users),
-        "total_scans": len(scan_history)
-    }
-
-# Vérifie l'abonnement
-async def is_subscribed(user_id: int) -> bool:
+# Vérifie si l'utilisateur est abonné
+async def is_subscribed(user_id):
     try:
-        member = await app.bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
-        return member.status in ['member', 'creator', 'administrator']
-    except:
+        member = await application.bot.get_chat_member(CHANNEL_ID, user_id)
+        return member.status in ("member", "administrator", "creator")
+    except Exception:
         return False
 
-# Message de bienvenue
+# /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not await is_subscribed(user.id):
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("S'abonner", url="https://t.me/+up78ma0Ev642YWM0")]])
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("S'abonner", url="https://t.me/+up78ma0Ev642YWM0")],
+            [InlineKeyboardButton("✅ J'ai rejoint", callback_data="check_sub")]
+        ])
         await update.message.reply_text(
             "Veuillez vous abonner à notre canal pour utiliser ce bot.",
             reply_markup=keyboard
         )
         return
     users.add(user.id)
-    await update.message.reply_text("Bienvenue sur le bot de @deku225, vous pouvez m'envoyer vos liens et APK suspects pour les analyser.")
+    await update.message.reply_text(
+        "Bienvenue sur le bot de @deku225, vous pouvez m'envoyer vos liens et APK suspects pour les analyser."
+    )
 
-# Traitement des messages
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if not await is_subscribed(user.id):
-        return
-
-    if update.message.document:
-        doc = update.message.document
-        if not doc.file_name.endswith(".apk"):
-            await update.message.reply_text("Veuillez envoyer un fichier .apk valide.")
-            return
-        file = await doc.get_file()
-        path = f"/tmp/{doc.file_unique_id}.apk"
-        await file.download_to_drive(path)
-        result = scan_file(path)
-    elif update.message.text and update.message.text.startswith("http"):
-        result = scan_url(update.message.text)
+# Vérification d'abonnement après clic
+async def check_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    if await is_subscribed(user_id):
+        users.add(user_id)
+        await query.edit_message_text("Merci d'avoir rejoint ! Envoyez un fichier ou un lien à analyser.")
     else:
-        await update.message.reply_text("Veuillez envoyer un fichier APK ou un lien.")
-        return
+        await query.answer("Vous n'avez pas encore rejoint le canal.", show_alert=True)
 
-    scan_history.append((user.id, result))
-    await update.message.reply_text(result, disable_web_page_preview=True)
+# Analyse d'un fichier
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_subscribed(update.effective_user.id):
+        return await update.message.reply_text("Abonnez-vous d'abord au canal pour utiliser ce bot.")
+    document = update.message.document
+    if not document.file_name.endswith(".apk"):
+        return await update.message.reply_text("Ce fichier n'est pas un APK.")
+    file = await document.get_file()
+    file_path = f"/tmp/{document.file_name}"
+    await file.download_to_drive(file_path)
+    result = await scan_file(file_path)
+    await update.message.reply_text(result)
 
-# Analyse de fichier
-def scan_file(file_path):
-    url = "https://www.virustotal.com/api/v3/files"
+# Analyse d'un lien
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_subscribed(update.effective_user.id):
+        return await update.message.reply_text("Abonnez-vous d'abord au canal pour utiliser ce bot.")
+    text = update.message.text
+    if text.startswith("http"):
+        result = await scan_url(text)
+        await update.message.reply_text(result)
+
+# Fonction scan fichier
+async def scan_file(file_path):
     headers = {"x-apikey": VT_API_KEY}
-    with open(file_path, "rb") as f:
-        resp = requests.post(url, headers=headers, files={"file": f})
-    data = resp.json()
-    analysis_id = data["data"]["id"]
+    async with aiohttp.ClientSession() as session:
+        with open(file_path, "rb") as f:
+            files = {"file": f}
+            async with session.post("https://www.virustotal.com/api/v3/files", headers=headers, data=files) as resp:
+                data = await resp.json()
+                file_id = data["data"]["id"]
+        async with session.get(f"https://www.virustotal.com/api/v3/analyses/{file_id}", headers=headers) as resp:
+            result = await resp.json()
+            return format_result(result)
 
-    # Récupération des résultats
-    report_url = f"https://www.virustotal.com/api/v3/analyses/{analysis_id}"
-    r = requests.get(report_url, headers=headers)
-    res = r.json()
-    stats = res["data"]["attributes"]["stats"]
+# Fonction scan lien
+async def scan_url(url):
+    headers = {"x-apikey": VT_API_KEY}
+    async with aiohttp.ClientSession() as session:
+        data = {"url": url}
+        async with session.post("https://www.virustotal.com/api/v3/urls", headers=headers, data=data) as resp:
+            res = await resp.json()
+            url_id = res["data"]["id"]
+        async with session.get(f"https://www.virustotal.com/api/v3/analyses/{url_id}", headers=headers) as resp:
+            result = await resp.json()
+            return format_result(result)
+
+# Formatage du résultat
+def format_result(data):
+    stats = data["data"]["attributes"]["stats"]
     total_detections = stats["malicious"] + stats["suspicious"]
+    detail_url = f"https://www.virustotal.com/gui/file/{data['meta']['file_info']['sha256']}" if "file_info" in data["meta"] else "https://www.virustotal.com"
     threats = []
-    if "results" in res["data"]["attributes"]:
-        for engine, result in res["data"]["attributes"]["results"].items():
-            if result.get("category") in ["malicious", "suspicious"]:
-                threats.append(f"- {engine}: {result.get('result')}")
+    for engine, res in data["data"]["attributes"]["results"].items():
+        if res["category"] in ["malicious", "suspicious"]:
+            threats.append(f"- {engine}: {res['result']}")
+    if total_detections > 0:
+        return f"⚠️ Menace détectée par {total_detections} moteurs:\n" + "\n".join(threats[:10]) + f"\n\n🔗 [Voir le rapport]({detail_url})"
+    return f"✅ Aucune menace détectée !\nFichier ou lien sûr selon {stats['undetected']} moteurs.\n\n🔗 [Voir le rapport]({detail_url})"
 
-    detail_url = f"https://www.virustotal.com/gui/file/{res['meta']['file_info']['sha256']}/detection"
-    if total_detections == 0:
-        return f"✅ Aucune menace détectée !\nFichier sûr selon {len(res['data']['attributes']['results'])} moteurs.\n\n🔗 [Voir le rapport]({detail_url})"
-    else:
-        return (
-            f"⚠️ Menace détectée par {total_detections} moteurs :\n"
-            + "\n".join(threats[:10])
-            + f"\n\n🔗 [Voir le rapport]({detail_url})"
-        )
+# Interface admin
+@app.route("/admin", methods=["GET"])
+def admin_home():
+    return f"<h2>Bienvenue admin</h2><p>Utilisateurs : {len(users)}</p><form method='post'><input name='msg'><button>Envoyer</button></form>"
 
-# Analyse de lien
-def scan_url(link):
-    url = "https://www.virustotal.com/api/v3/urls"
-    headers = {"x-apikey": VT_API_KEY}
-    data = {"url": link}
-    response = requests.post(url, headers=headers, data=data)
-    res = response.json()
-    analysis_id = res["data"]["id"]
-
-    # Rapport
-    report_url = f"https://www.virustotal.com/api/v3/analyses/{analysis_id}"
-    r = requests.get(report_url, headers=headers)
-    result = r.json()
-    stats = result["data"]["attributes"]["stats"]
-    total = stats["malicious"] + stats["suspicious"]
-
-    detail_url = f"https://www.virustotal.com/gui/url/{analysis_id.replace('-', '')}/detection"
-
-    if total == 0:
-        return f"✅ Aucun problème détecté avec ce lien.\n\n🔗 [Voir le rapport complet]({detail_url})"
-    else:
-        return f"⚠️ Ce lien a été détecté comme suspect par {total} moteurs.\n\n🔗 [Voir le rapport complet]({detail_url})"
-
-# Handlers
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.ALL, handle_message))
+@app.route("/admin", methods=["POST"])
+def admin_send():
+    msg = request.form["msg"]
+    for uid in users:
+        try:
+            application.bot.send_message(chat_id=uid, text=f"[ADMIN] {msg}")
+        except:
+            pass
+    return "<p>Message envoyé</p><a href='/admin'>Retour</a>"
 
 if __name__ == "__main__":
-    import threading
-    threading.Thread(target=web.run, kwargs={"host": "0.0.0.0", "port": 8080}).start()
-    app.run_polling()
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(check_subscription, pattern="check_sub"))
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    application.run_webhook(listen="0.0.0.0", port=int(os.environ.get("PORT", 5000)), webhook_url=os.environ.get("RENDER_EXTERNAL_URL"))
