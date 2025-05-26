@@ -85,7 +85,7 @@ def get_report(resource_id, report_type="files"):
         engines = data["data"]["attributes"]["last_analysis_results"]
         threats = [f"{e}: {r['result']}" for e, r in engines.items() if r["category"] in ["malicious", "suspicious"]]
         detail_url = f"https://www.virustotal.com/gui/{report_type}/{resource_id}"
-        return f"⚠️ Menace détectée par {total_detections} moteurs:
+        return f"⚠️ Menace détectée par {total_detections} moteurs :\n{detections}"
 " + "\n".join(threats[:10]) + f"\n\n🔗 [Voir le rapport]({detail_url})"
     else:
         detail_url = f"https://www.virustotal.com/gui/{report_type}/{resource_id}"
