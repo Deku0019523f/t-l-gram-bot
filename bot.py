@@ -1,152 +1,122 @@
 import os
-import requests
-from langdetect import detect
-from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
+import logging
+import hashlib
+import aiohttp
+from telegram import Update, InputFile
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from datetime import datetime
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 VT_API_KEY = os.getenv("VT_API_KEY")
 ADMIN_ID = 1299831974
 
-VT_FILE_URL = 'https://www.virustotal.com/api/v3/files'
-VT_URL_SCAN = 'https://www.virustotal.com/api/v3/urls'
-VT_URL_REPORT = 'https://www.virustotal.com/api/v3/analyses/{}'
+# Configurer le logging
+logging.basicConfig(level=logging.INFO)
 
-headers = {"x-apikey": VT_API_KEY}
-history = []  # Historique des analyses
+# Stock temporaire pour les analyses (en mémoire)
+scan_history = []
 
-# Messages
-MESSAGES = {
-    "start": {
-        "fr": "👋 *Bienvenue !*\n\nEnvoie-moi un lien ou un fichier APK, je l'analyserai.",
-        "en": "👋 *Welcome!*\n\nSend me a link or an APK file, I’ll scan it for you.",
-        "ja": "👋 *ようこそ！*\n\nリンクまたはAPKファイルを送ってください。ウイルスチェックします。"
-    },
-    "not_apk": {
-        "fr": "❗ Ce n’est pas un fichier APK.",
-        "en": "❗ This is not an APK file.",
-        "ja": "❗ これはAPKファイルではありません。"
-    },
-    "file_ok": {
-        "fr": "📦 Fichier reçu. Envoi à VirusTotal...",
-        "en": "📦 File received. Uploading to VirusTotal...",
-        "ja": "📦 ファイルを受信しました。VirusTotalに送信中..."
-    },
-    "url_ok": {
-        "fr": "🔍 Analyse du lien en cours...",
-        "en": "🔍 Scanning the link...",
-        "ja": "🔍 リンクをスキャン中..."
-    },
-    "file_error": {
-        "fr": "❌ Erreur lors de l’envoi du fichier.",
-        "en": "❌ Error while uploading the file.",
-        "ja": "❌ ファイルのアップロード中にエラーが発生しました。"
-    },
-    "url_error": {
-        "fr": "❌ Erreur lors de l'analyse du lien.",
-        "en": "❌ Error while scanning the link.",
-        "ja": "❌ リンクのスキャン中にエラーが発生しました。"
-    },
-    "threat": {
-        "fr": "⚠️ *Menace détectée !*\n{mal} moteurs sur {total} ont signalé une menace.\n\n🔗 [Voir le rapport]({url})",
-        "en": "⚠️ *Threat detected!*\n{mal} engines out of {total} flagged this as malicious.\n\n🔗 [View report]({url})",
-        "ja": "⚠️ *脅威が検出されました！*\n{total}中{mal}のエンジンが悪意のあるものとして検出しました。\n\n🔗 [レポートを見る]({url})"
-    },
-    "clean": {
-        "fr": "✅ *Aucune menace détectée !*\nFichier ou lien sûr selon {total} moteurs.\n\n🔗 [Voir le rapport]({url})",
-        "en": "✅ *No threats detected!*\nFile or link is clean according to {total} engines.\n\n🔗 [View report]({url})",
-        "ja": "✅ *脅威は検出されませんでした！*\n{total}のエンジンによると安全です。\n\n🔗 [レポートを見る]({url})"
-    },
-    "report_fail": {
-        "fr": "❌ Impossible de récupérer le rapport.",
-        "en": "❌ Failed to retrieve report.",
-        "ja": "❌ レポートの取得に失敗しました。"
-    }
-}
-
-def get_lang(text):
-    try:
-        lang = detect(text)
-        return lang if lang in ["fr", "en", "ja"] else "fr"
-    except:
-        return "fr"
-
-def msg(key, lang="fr", **kwargs):
-    return MESSAGES[key][lang].format(**kwargs)
-
-# /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = get_lang(update.message.text or "")
-    await update.message.reply_text(msg("start", lang), parse_mode='Markdown')
+    await update.message.reply_text("Bienvenue ! Envoyez un fichier APK pour analyse.")
 
-# Commande /admin pour voir les derniers scans
+def get_file_hash(path):
+    with open(path, 'rb') as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+async def upload_and_scan(file_path):
+    hash_sha256 = get_file_hash(file_path)
+    headers = {"x-apikey": VT_API_KEY}
+    async with aiohttp.ClientSession() as session:
+        # Vérifier si le fichier est déjà connu
+        url_report = f"https://www.virustotal.com/api/v3/files/{hash_sha256}"
+        async with session.get(url_report, headers=headers) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return data
+
+        # Sinon, on l'upload
+        with open(file_path, "rb") as f:
+            files = {'file': f}
+            upload_url = "https://www.virustotal.com/api/v3/files"
+            async with session.post(upload_url, headers=headers, data=files) as upload_resp:
+                if upload_resp.status == 200:
+                    uploaded = await upload_resp.json()
+                    file_id = uploaded["data"]["id"]
+
+        # Obtenir le rapport via l'ID
+        async with session.get(f"https://www.virustotal.com/api/v3/analyses/{file_id}", headers=headers) as analysis_resp:
+            return await analysis_resp.json()
+
+def format_result(data):
+    if "data" not in data or "attributes" not in data["data"]:
+        return "Analyse en cours ou invalide."
+
+    attr = data["data"]["attributes"]
+    stats = attr["stats"]
+    total = sum(stats.values())
+    detected = stats.get("malicious", 0) + stats.get("suspicious", 0)
+
+    details = ""
+    if "results" in attr:
+        for engine, result in attr["results"].items():
+            if result["category"] in ("malicious", "suspicious"):
+                details += f"- {engine}: {result['result']}\n"
+
+    permalink = f"https://www.virustotal.com/gui/file/{attr['sha256']}/detection"
+    summary = f"""
+Résultat de l'analyse :
+
+{'⚠️' if detected else '✅'} {'Menace détectée !' if detected else 'Aucune menace détectée !'}
+Moteurs détectant une menace : {detected}/{total}
+
+{details if details else 'Aucune menace détaillée fournie.'}
+
+🔗 Rapport complet : {permalink}
+"""
+    return summary.strip()
+
+async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    doc = update.message.document
+    if not doc or not doc.file_name.endswith(".apk"):
+        await update.message.reply_text("Veuillez envoyer un fichier APK.")
+        return
+
+    file = await context.bot.get_file(doc.file_id)
+    file_path = f"/tmp/{doc.file_name}"
+    await file.download_to_drive(file_path)
+
+    result = await upload_and_scan(file_path)
+    text = format_result(result)
+
+    # Log pour admin
+    scan_history.append({
+        "user": update.message.from_user.username,
+        "filename": doc.file_name,
+        "datetime": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        "result": text
+    })
+
+    await update.message.reply_text(text)
+
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if update.message.from_user.id != ADMIN_ID:
         await update.message.reply_text("Accès refusé.")
         return
-    if not history:
+
+    if not scan_history:
         await update.message.reply_text("Aucune analyse enregistrée.")
         return
-    await update.message.reply_text("\n\n".join(history[-10:]))
 
-# Analyse de lien
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = get_lang(update.message.text)
-    url = update.message.text
-    await update.message.reply_text(msg("url_ok", lang))
-    r = requests.post(VT_URL_SCAN, headers=headers, data={'url': url})
-    if r.status_code != 200:
-        await update.message.reply_text(msg("url_error", lang))
-        return
-    scan_id = r.json()['data']['id']
-    report = requests.get(VT_URL_REPORT.format(scan_id), headers=headers)
-    if report.status_code == 200:
-        data = report.json()
-        stats = data['data']['attributes']['stats']
-        mal = stats.get('malicious', 0)
-        total = sum(stats.values())
-        vt_url = f"https://www.virustotal.com/gui/url/{scan_id}/detection"
-        key = "threat" if mal > 0 else "clean"
-        result = msg(key, lang, mal=mal, total=total, url=vt_url)
-        await update.message.reply_text(result, parse_mode='Markdown')
-        history.append(f"[URL] {url}\n→ {mal}/{total} → {vt_url}")
-    else:
-        await update.message.reply_text(msg("report_fail", lang))
+    last = scan_history[-5:]
+    msg = "\n\n".join(
+        f"Utilisateur : @{entry['user']}\nFichier : {entry['filename']}\nDate : {entry['datetime']}\n{entry['result']}"
+        for entry in last
+    )
+    await update.message.reply_text(f"Dernières analyses :\n\n{msg}")
 
-# Analyse fichier APK
-async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = get_lang(update.message.caption or "")
-    doc = update.message.document
-    if not doc.file_name.endswith(".apk") and doc.mime_type != 'application/vnd.android.package-archive':
-        await update.message.reply_text(msg("not_apk", lang))
-        return
-    await update.message.reply_text(msg("file_ok", lang))
-    file = await doc.get_file()
-    path = await file.download_to_drive()
-    with open(path, 'rb') as f:
-        r = requests.post(VT_FILE_URL, headers=headers, files={'file': f})
-    if r.status_code != 200:
-        await update.message.reply_text(msg("file_error", lang))
-        return
-    scan_id = r.json()['data']['id']
-    report = requests.get(VT_URL_REPORT.format(scan_id), headers=headers)
-    if report.status_code == 200:
-        data = report.json()
-        stats = data['data']['attributes']['stats']
-        mal = stats.get('malicious', 0)
-        total = sum(stats.values())
-        vt_url = f"https://www.virustotal.com/gui/file/{scan_id}/detection"
-        key = "threat" if mal > 0 else "clean"
-        result = msg(key, lang, mal=mal, total=total, url=vt_url)
-        await update.message.reply_text(result, parse_mode='Markdown')
-        history.append(f"[APK] {doc.file_name}\n→ {mal}/{total} → {vt_url}")
-    else:
-        await update.message.reply_text(msg("report_fail", lang))
-
-# Lancement bot
-app = ApplicationBuilder().token(BOT_TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("admin", admin))
-app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-app.run_polling()
+if __name__ == "__main__":
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
+    app.run_polling()
