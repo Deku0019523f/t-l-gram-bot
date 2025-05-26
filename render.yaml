@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: telegram-virus-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: BOT_TOKEN
+        value: 8071717887:AAFyXdPIagfBvurPZ8aLYRg4VlU61nTZ22E
+      - key: VT_API_KEY
+        value: 1131775d5d74f8457607cad7681f4ac68d904c176f9b1f6eeeb660374db398ed
