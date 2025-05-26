@@ -4,9 +4,8 @@ from langdetect import detect
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
 
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-VT_API_KEY = os.getenv('VT_API_KEY')
-
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+VT_API_KEY = os.getenv("VT_API_KEY")
 ADMIN_ID = 1299831974
 
 VT_FILE_URL = 'https://www.virustotal.com/api/v3/files'
@@ -14,7 +13,9 @@ VT_URL_SCAN = 'https://www.virustotal.com/api/v3/urls'
 VT_URL_REPORT = 'https://www.virustotal.com/api/v3/analyses/{}'
 
 headers = {"x-apikey": VT_API_KEY}
+history = []  # Historique des analyses
 
+# Messages
 MESSAGES = {
     "start": {
         "fr": "👋 *Bienvenue !*\n\nEnvoie-moi un lien ou un fichier APK, je l'analyserai.",
@@ -73,23 +74,32 @@ def get_lang(text):
 def msg(key, lang="fr", **kwargs):
     return MESSAGES[key][lang].format(**kwargs)
 
+# /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_lang(update.message.text or "")
     await update.message.reply_text(msg("start", lang), parse_mode='Markdown')
 
+# Commande /admin pour voir les derniers scans
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("Accès refusé.")
+        return
+    if not history:
+        await update.message.reply_text("Aucune analyse enregistrée.")
+        return
+    await update.message.reply_text("\n\n".join(history[-10:]))
+
+# Analyse de lien
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_lang(update.message.text)
     url = update.message.text
     await update.message.reply_text(msg("url_ok", lang))
-
     r = requests.post(VT_URL_SCAN, headers=headers, data={'url': url})
     if r.status_code != 200:
         await update.message.reply_text(msg("url_error", lang))
         return
-
     scan_id = r.json()['data']['id']
     report = requests.get(VT_URL_REPORT.format(scan_id), headers=headers)
-
     if report.status_code == 200:
         data = report.json()
         stats = data['data']['attributes']['stats']
@@ -97,33 +107,29 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total = sum(stats.values())
         vt_url = f"https://www.virustotal.com/gui/url/{scan_id}/detection"
         key = "threat" if mal > 0 else "clean"
-        await update.message.reply_text(msg(key, lang, mal=mal, total=total, url=vt_url), parse_mode='Markdown')
-        await context.bot.send_message(chat_id=ADMIN_ID, text=f"[ADMIN] Lien analysé: {url}\nMenace: {mal}/{total}")
+        result = msg(key, lang, mal=mal, total=total, url=vt_url)
+        await update.message.reply_text(result, parse_mode='Markdown')
+        history.append(f"[URL] {url}\n→ {mal}/{total} → {vt_url}")
     else:
         await update.message.reply_text(msg("report_fail", lang))
 
+# Analyse fichier APK
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = get_lang(update.message.caption or "")
     doc = update.message.document
-    file_name = doc.file_name.lower()
-
-    if not (file_name.endswith(".apk") or doc.mime_type == 'application/vnd.android.package-archive'):
+    if not doc.file_name.endswith(".apk") and doc.mime_type != 'application/vnd.android.package-archive':
         await update.message.reply_text(msg("not_apk", lang))
         return
-
     await update.message.reply_text(msg("file_ok", lang))
     file = await doc.get_file()
-    file_path = await file.download_to_drive()
-
-    with open(file_path, 'rb') as f:
+    path = await file.download_to_drive()
+    with open(path, 'rb') as f:
         r = requests.post(VT_FILE_URL, headers=headers, files={'file': f})
     if r.status_code != 200:
         await update.message.reply_text(msg("file_error", lang))
         return
-
     scan_id = r.json()['data']['id']
     report = requests.get(VT_URL_REPORT.format(scan_id), headers=headers)
-
     if report.status_code == 200:
         data = report.json()
         stats = data['data']['attributes']['stats']
@@ -131,15 +137,16 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total = sum(stats.values())
         vt_url = f"https://www.virustotal.com/gui/file/{scan_id}/detection"
         key = "threat" if mal > 0 else "clean"
-        await update.message.reply_text(msg(key, lang, mal=mal, total=total, url=vt_url), parse_mode='Markdown')
-        await context.bot.send_message(chat_id=ADMIN_ID, text=f"[ADMIN] Fichier reçu: {file_name}\nMenace: {mal}/{total}")
+        result = msg(key, lang, mal=mal, total=total, url=vt_url)
+        await update.message.reply_text(result, parse_mode='Markdown')
+        history.append(f"[APK] {doc.file_name}\n→ {mal}/{total} → {vt_url}")
     else:
         await update.message.reply_text(msg("report_fail", lang))
 
-# Lancement
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.run_polling()
+# Lancement bot
+app = ApplicationBuilder().token(BOT_TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("admin", admin))
+app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+app.run_polling()
