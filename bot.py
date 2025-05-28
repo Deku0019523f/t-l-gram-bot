@@ -1,4 +1,6 @@
-import os import json from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
+import os 
+import json 
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 
 ADMIN_USERNAME = "@deku225" PRODUCTS_FILE = "products.json" PAYMENT_NUMBERS = """\n💳 Numéros pour le paiement : • Wave : +2250575719113 • Orange : +2250718623773 • MTN : +2250596430369\n"""
 
