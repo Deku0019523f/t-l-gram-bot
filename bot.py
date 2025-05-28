@@ -1,113 +1,76 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+import json import os from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
-# Configuration
-OWNER_USERNAME = "@deku225"
-PAYMENT_NUMBERS = {
-    "Orange": "+225 0718623773",
-    "MTN": "+225 0596430369",
-    "Wave": "+225 0575719113"
-}
-PROMO_PRODUCTS = ["Abonnement-IPTV-1mois"]
+Fichier produits
 
-products = [
-    {"title": "Internet Orange CI - 80 Go", "price": 8000, "category": "Abonnement"},
-    {"title": "Internet Orange CI - 100 Go", "price": 13000, "category": "Abonnement"},
-    {"title": "Internet Orange CI - 48 Go", "price": 6500, "category": "Abonnement"},
-    {"title": "BOOSTAGE TIKTOK - 1000 abonnés", "price": 1500, "category": "Abonnement"},
-    {"title": "BOOSTAGE YOUTUBE - 1000 abonnés", "price": 5000, "category": "Abonnement"},
-    {"title": "BOOSTAGE INSTAGRAM - 1000 abonnés", "price": 1000, "category": "Abonnement"},
-    {"title": "Netflix - 1 mois", "price": 2400, "category": "Abonnement"},
-    {"title": "Netflix - 3 mois", "price": 7000, "category": "Abonnement"},
-    {"title": "Abonnement-IPTV-1mois", "price": 1500, "category": "Abonnement"},
-    {"title": "Abonnement-IPTV-3mois", "price": 8000, "category": "Abonnement"},
-    {"title": "VPS 2GB RAM", "price": 2500, "category": "Abonnement"},
-    {"title": "VPS 4GB RAM", "price": 4000, "category": "Abonnement"},
-    {"title": "TikTok français monétiser", "price": 5000, "category": "abonnement"},
-    {"title": "Logiciel d’espionnage", "price": 3000, "category": "Logiciel"},
-    {"title": "Script Chumogh SSH #SLOWDNS", "price": 5000, "category": "Logiciel"},
-    {"title": "Script + VPS pour WhatsApp Bot", "price": 3000, "category": "Logiciel"},
-    {"title": "Hack caméra frontale avec Termux", "price": 2000, "category": "Logiciel"},
-    {"title": "Outils de Phishing avec Termux", "price": 3000, "category": "Logiciel"}
-]
+PRODUCTS_FILE = 'products.json' ADMIN_USERNAME = '@deku225'
 
-user_orders = {}
+Chargement produits
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    keyboard = [
-        [InlineKeyboardButton("🛍️ Produits", callback_data="products")],
-        [InlineKeyboardButton("📝 Avis", callback_data="avis")],
-        [InlineKeyboardButton("📞 Contacter un agent", url="https://t.me/deku225")],
-    ]
-    welcome_text = (
-        f"Bienvenue {user.mention_html()} dans la boutique officielle Deku 🧩 !\n"
-        f"Voici ce que tu peux faire ci-dessous 👇\n\n"
-        "Ce bot vous permet de commander et recevoir vos produits instantanément après paiement.\n"
-        f"Contact : {OWNER_USERNAME}"
-    )
-    await update.message.reply_html(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
+def load_products(): if not os.path.exists(PRODUCTS_FILE): return [] with open(PRODUCTS_FILE, 'r') as f: return json.load(f)
 
-async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    for product in products:
-        title = f"🔥 Promo - {product['title']}" if product["title"] in PROMO_PRODUCTS else product["title"]
-        text = f"📦 <b>{title}</b>\n💰 Prix : {product['price']} FCFA\n📂 Catégorie : {product['category']}"
-        keyboard = [[InlineKeyboardButton("🛒 Commander", callback_data=f"order|{product['title']}")]]
-        await query.message.reply_html(text, reply_markup=InlineKeyboardMarkup(keyboard))
+def save_products(products): with open(PRODUCTS_FILE, 'w') as f: json.dump(products, f, indent=2)
 
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if query.data.startswith("order|"):
-        _, product_name = query.data.split("|")
-        user_orders[query.from_user.id] = product_name
-        await query.answer()
-        text = (
-            f"🛍️ Vous avez sélectionné : <b>{product_name}</b>\n"
-            "Veuillez envoyer l’ID de la transaction accompagné du moyen de paiement (Orange / MTN / Wave).\n\n"
-            f"Exemple : `Orange 12345678`\n\n"
-            f"Numéros pour paiement :\n"
-            f"• Orange : {PAYMENT_NUMBERS['Orange']}\n"
-            f"• MTN : {PAYMENT_NUMBERS['MTN']}\n"
-            f"• Wave : {PAYMENT_NUMBERS['Wave']}"
-        )
-        await query.message.reply_html(text)
-    elif query.data == "products":
-        await show_products(update, context)
-    elif query.data == "avis":
-        await query.answer("Merci de laisser un avis positif 🙏")
+Commande /start
 
-async def handle_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in user_orders:
-        return await update.message.reply_text("Veuillez d’abord choisir un produit avec 🛒 Commander.")
-    
-    try:
-        parts = update.message.text.strip().split(" ")
-        method = parts[0]
-        tx_id = parts[1]
-    except:
-        return await update.message.reply_text("Format invalide. Utilisez par exemple : Orange 12345678")
-    
-    produit = user_orders.pop(user_id)
-    reçu = (
-        f"✅ *REÇU DE COMMANDE*\n\n"
-        f"• Produit : {produit}\n"
-        f"• Paiement via : {method}\n"
-        f"• ID de transaction : `{tx_id}`\n\n"
-        f"Merci de copier ce reçu et de l’envoyer à {OWNER_USERNAME}."
-    )
-    await update.message.reply_markdown(reçu)
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE): user = update.effective_user keyboard = [[InlineKeyboardButton("Voir les produits", callback_data='list')]] await update.message.reply_text( f"Bienvenue dans la boutique, {user.first_name} !\n\n📦 Commandez facilement vos services numériques.\nCliquez ci-dessous pour commencer.", reply_markup=InlineKeyboardMarkup(keyboard) )
 
-if __name__ == "__main__":
-    import os
-    TOKEN = os.environ.get("BOT_TOKEN")  # à définir dans Railway
+Afficher produits
 
-    app = ApplicationBuilder().token(TOKEN).build()
+async def list_products(update: Update, context: ContextTypes.DEFAULT_TYPE): query = update.callback_query await query.answer() products = load_products()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_transaction))
+for p in products:
+    promo = "🔥 Promo" if p.get('promo') else ""
+    msg = f"📦 <b>{p['title']}</b>\n💰 Prix : {p['price']} FCFA\n🏷️ Catégorie : {p['category']}\n{promo}"
+    keyboard = [[InlineKeyboardButton("Commander", callback_data=f"order|{p['title']}")]]
+    await query.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
 
-    app.run_polling()
+Commander un produit
+
+async def order(update: Update, context: ContextTypes.DEFAULT_TYPE): query = update.callback_query _, title = query.data.split('|') context.user_data['order'] = title await query.answer() await query.message.reply_text( f"📝 Entrez maintenant l'ID de transaction + le mode de paiement (par ex : 123456 Orange Money) pour le produit : {title}" )
+
+Réception ID de paiement
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE): if 'order' in context.user_data: detail = context.user_data.pop('order') user_input = update.message.text msg = f"✅ Reçu enregistré :\nProduit : {detail}\n🧾 Détails : {user_input}\nMerci d'envoyer ceci à @deku225." keyboard = [[InlineKeyboardButton("⬅️ Retour", callback_data='list')]] await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard))
+
+Commande /avis
+
+async def avis(update: Update, context: ContextTypes.DEFAULT_TYPE): await update.message.reply_text("⭐ Laissez votre avis en répondant à ce message ou contactez @deku225 directement.")
+
+Gestion admin
+
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE): if update.effective_user.username != ADMIN_USERNAME.strip('@'): await update.message.reply_text("⛔ Accès refusé.") return
+
+text = update.message.text.split(' ', 1)
+if len(text) < 2:
+    await update.message.reply_text("⚙️ Format invalide. Utilisez :\n/add title|price|category\n/del title\n/promo title")
+    return
+
+cmd, args = text[0], text[1]
+products = load_products()
+
+if cmd == '/add':
+    title, price, category = args.split('|')
+    products.append({"title": title, "price": int(price), "category": category})
+    save_products(products)
+    await update.message.reply_text(f"✅ Produit ajouté : {title}")
+elif cmd == '/del':
+    products = [p for p in products if p['title'] != args]
+    save_products(products)
+    await update.message.reply_text(f"🗑️ Produit supprimé : {args}")
+elif cmd == '/promo':
+    for p in products:
+        if p['title'] == args:
+            p['promo'] = True
+    save_products(products)
+    await update.message.reply_text(f"🔥 Promo activée sur : {args}")
+else:
+    await update.message.reply_text("Commande inconnue")
+
+Dispatcher
+
+app = ApplicationBuilder().token("VOTRE_TOKEN_BOT").build()
+
+app.add_handler(CommandHandler("start", start)) app.add_handler(CallbackQueryHandler(list_products, pattern='^list$')) app.add_handler(CallbackQueryHandler(order, pattern='^order|')) app.add_handler(CommandHandler("avis", avis)) app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)) app.add_handler(MessageHandler(filters.TEXT & filters.User(username=ADMIN_USERNAME), admin))
+
+if name == 'main': print("Bot lancé...") app.run_polling()
+
