@@ -1,166 +1,63 @@
-import os
-import json
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
+import os import json from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 
-# Identifiant Telegram de l'administrateur
-ADMIN_USERNAME = "deku225"
+ADMIN_USERNAME = "@deku225" PRODUCTS_FILE = "products.json" PAYMENT_NUMBERS = """\n💳 Numéros pour le paiement : • Wave : +2250575719113 • Orange : +2250718623773 • MTN : +2250596430369\n"""
 
-# Charger les produits
-def load_products():
-    with open("products.json", "r") as f:
-        return json.load(f)
+Charger les produits depuis le fichier JSON
 
-# Sauvegarder les produits
-def save_products(products):
-    with open("products.json", "w") as f:
-        json.dump(products, f, indent=2)
+def load_products(): if not os.path.exists(PRODUCTS_FILE): return [] with open(PRODUCTS_FILE, "r") as f: return json.load(f)
 
-# Générer les boutons pour les produits
-def generate_product_buttons(products):
-    buttons = []
-    for index, product in enumerate(products):
-        label = f"🔥 Promo - {product['title']}" if product.get("promo") else product['title']
-        buttons.append([InlineKeyboardButton(label, callback_data=f"product_{index}")])
-    return buttons
+Sauvegarder les produits dans le fichier JSON
 
-# Page d'accueil
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_text = (
-        "🛍️ *Bienvenue sur la boutique !*\n"
-        "Sélectionnez un produit ci-dessous pour commander.\n\n"
-        "_Vous pouvez payer via :_\n"
-        "📱 MTN : +2250596430369\n"
-        "📱 ORANGE : +2250718623773\n"
-        "📱 WAVE : +2250575719113\n\n"
-        "🛒 Commandez facilement et rapidement !"
-    )
-    products = load_products()
-    reply_markup = InlineKeyboardMarkup(generate_product_buttons(products))
-    await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=reply_markup)
+def save_products(products): with open(PRODUCTS_FILE, "w") as f: json.dump(products, f, indent=2)
 
-# Commande /avis
-async def avis(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🙏 Merci de laisser un avis ! Tapez votre avis ici, nous le lirons avec attention.")
+Formater l'affichage d'un produit
 
-# Affichage d’un produit
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
+def format_product(prod, index): promo_tag = "🔥 Promo" if prod.get("promo") else "" return f"{index+1}. {prod['name']} - {prod['price']} FCFA {promo_tag}"
 
-    if data.startswith("product_"):
-        index = int(data.split("_")[1])
-        product = load_products()[index]
-        text = (
-            f"📦 *{product['title']}*\n"
-            f"💰 Prix : {product['price']} FCFA\n"
-            f"📂 Catégorie : {product['category']}\n\n"
-            "👉 Cliquez sur 'Commander' pour poursuivre."
-        )
-        keyboard = [
-            [InlineKeyboardButton("✅ Commander", callback_data=f"order_{index}")],
-            [InlineKeyboardButton("⬅️ Retour", callback_data="home")]
-        ]
-        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+Commande /start
 
-    elif data.startswith("order_"):
-        index = int(data.split("_")[1])
-        context.user_data["order_index"] = index
-        await query.edit_message_text(
-            "🔁 Envoyez l'identifiant de transaction et le moyen de paiement (ex: *WAVE 123456789*)",
-            parse_mode="Markdown"
-        )
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE): products = load_products() keyboard = [[InlineKeyboardButton("Commander", callback_data=f"order_{i}")] for i in range(len(products))] msg = "🛒 Nos produits disponibles :\n\n" msg += "\n".join(format_product(p, i) for i, p in enumerate(products)) await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
-    elif data == "home":
-        products = load_products()
-        await query.edit_message_text(
-            "🛍️ *Retour à la boutique*\n\n_Sélectionnez un produit ci-dessous_",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(generate_product_buttons(products))
-        )
+Bouton retour
 
-# Gestion du reçu après transaction
-async def handle_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if "order_index" not in context.user_data:
-        return
+async def retour(update: Update, context: ContextTypes.DEFAULT_TYPE): query = update.callback_query await query.answer() await start(update, context)
 
-    index = context.user_data["order_index"]
-    product = load_products()[index]
-    msg = update.message.text
+Gestion des commandes
 
-    receipt = (
-        f"🧾 *Reçu de commande*\n"
-        f"📦 Produit : {product['title']}\n"
-        f"💳 Paiement : {msg}\n"
-        f"💰 Prix : {product['price']} FCFA\n"
-        f"👤 Client : @{update.effective_user.username or update.effective_user.first_name}\n\n"
-        f"Merci d’avoir commandé !"
-    )
-    await update.message.reply_text(receipt, parse_mode="Markdown")
-    del context.user_data["order_index"]
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE): query = update.callback_query await query.answer() data = query.data if data.startswith("order_"): index = int(data.split("_")[1]) products = load_products() product = products[index] context.user_data['product'] = product msg = f"Vous avez choisi : {product['name']} - {product['price']} FCFA\n{PAYMENT_NUMBERS}\n\nVeuillez envoyer l'ID de la transaction après paiement." await query.edit_message_text(msg, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([ [InlineKeyboardButton("🔙 Retour", callback_data="retour")] ])) elif data == "retour": await retour(update, context)
 
-# ADMIN : Ajouter un produit
-async def admin_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.username != ADMIN_USERNAME:
-        return
-    args = context.args
-    if len(args) < 3:
-        await update.message.reply_text("Usage : /add Titre Prix Catégorie")
-        return
-    title = args[0]
-    price = int(args[1])
-    category = args[2]
-    products = load_products()
-    products.append({"title": title, "price": price, "category": category})
-    save_products(products)
-    await update.message.reply_text(f"✅ Produit '{title}' ajouté.")
+Réception du reçu
 
-# ADMIN : Supprimer un produit
-async def admin_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.username != ADMIN_USERNAME:
-        return
-    args = context.args
-    if not args:
-        await update.message.reply_text("Usage : /del IndexProduit")
-        return
-    index = int(args[0])
-    products = load_products()
-    if 0 <= index < len(products):
-        removed = products.pop(index)
-        save_products(products)
-        await update.message.reply_text(f"❌ Produit supprimé : {removed['title']}")
-    else:
-        await update.message.reply_text("❌ Index invalide.")
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE): if 'product' in context.user_data: product = context.user_data['product'] receipt = f"🧾 Reçu de commande\n\nProduit : {product['name']}\nPrix : {product['price']} FCFA\n\nID de transaction : {update.message.text}\n\nMerci pour votre achat !" await update.message.reply_text(receipt, parse_mode="Markdown") del context.user_data['product']
 
-# ADMIN : Mettre un produit en promo
-async def admin_promo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.username != ADMIN_USERNAME:
-        return
-    args = context.args
-    if not args:
-        await update.message.reply_text("Usage : /promo IndexProduit")
-        return
-    index = int(args[0])
-    products = load_products()
-    if 0 <= index < len(products):
-        products[index]["promo"] = True
-        save_products(products)
-        await update.message.reply_text(f"🔥 Produit mis en promo : {products[index]['title']}")
-    else:
-        await update.message.reply_text("❌ Index invalide.")
+Commande /avis
 
-# Lancer le bot
-if __name__ == "__main__":
-    app = ApplicationBuilder().token("BOT_TOKEN").build()
+async def avis(update: Update, context: ContextTypes.DEFAULT_TYPE): await update.message.reply_text("💬 Pour laisser un avis, répondez simplement à ce message avec votre retour. Merci !")
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("avis", avis))
-    app.add_handler(CommandHandler("add", admin_add))
-    app.add_handler(CommandHandler("del", admin_del))
-    app.add_handler(CommandHandler("promo", admin_promo))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_transaction))
+ADMIN - Ajout produit
 
-    print("✅ Bot en ligne !")
-    app.run_polling()
+async def add_product(update: Update, context: ContextTypes.DEFAULT_TYPE): if update.message.from_user.username != ADMIN_USERNAME[1:]: return try: name, price = update.message.text.split(" ", 1)[1].rsplit(" ", 1) products = load_products() products.append({"name": name, "price": price, "promo": False}) save_products(products) await update.message.reply_text("✅ Produit ajouté.") except: await update.message.reply_text("Utilise : /add Nom_du_produit Prix")
+
+ADMIN - Supprimer produit
+
+async def del_product(update: Update, context: ContextTypes.DEFAULT_TYPE): if update.message.from_user.username != ADMIN_USERNAME[1:]: return try: index = int(update.message.text.split(" ", 1)[1]) - 1 products = load_products() removed = products.pop(index) save_products(products) await update.message.reply_text(f"🗑️ Supprimé : {removed['name']}") except: await update.message.reply_text("Utilise : /del numéro_du_produit")
+
+ADMIN - Activer promo
+
+async def promo_product(update: Update, context: ContextTypes.DEFAULT_TYPE): if update.message.from_user.username != ADMIN_USERNAME[1:]: return try: index = int(update.message.text.split(" ", 1)[1]) - 1 products = load_products() products[index]["promo"] = True save_products(products) await update.message.reply_text(f"🔥 Promo activée pour : {products[index]['name']}") except: await update.message.reply_text("Utilise : /promo numéro_du_produit")
+
+Lancer le bot
+
+if name == 'main': TOKEN = os.getenv("BOT_TOKEN") app = ApplicationBuilder().token(TOKEN).build()
+
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("avis", avis))
+app.add_handler(CommandHandler("add", add_product))
+app.add_handler(CommandHandler("del", del_product))
+app.add_handler(CommandHandler("promo", promo_product))
+app.add_handler(CallbackQueryHandler(button))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+print("✅ Bot en ligne !")
+app.run_polling()
+
