@@ -171,8 +171,16 @@ def handle_transaction(update: Update, context: CallbackContext):
         price = product["price"]
 
     # Envoi du reçu au client
+    # Envoi du reçu au client
     receipt = (
         f"✅ *Commande reçue*\n\n"
         f"Produit : {pending_title}\n"
         f"Prix : {price} FCFA\n"
         f"Transaction : {tx_number}\n"
+        f"Moyen de paiement : {pay_method}\n\n"
+        "Merci pour votre achat ! Un agent vous contactera bientôt."
+    )
+
+    update.message.reply_text(receipt, parse_mode='Markdown')
+    # On supprime la commande en cours
+    del context.user_data["pending_order"]
