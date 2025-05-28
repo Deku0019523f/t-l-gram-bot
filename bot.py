@@ -5,8 +5,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 OWNER_USERNAME = "@deku225"
 PAYMENT_NUMBERS = {
     "Orange": "+225 0718623773",
-    "MTN": "+225 0575719113",
-    "Wave": "+225 0596430369"
+    "MTN": "+225 0596430369",
+    "Wave": "+225 0575719113"
 }
 PROMO_PRODUCTS = ["Abonnement-IPTV-1mois"]
 
