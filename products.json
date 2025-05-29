@@ -7,7 +7,13 @@
   { "title": "BOOSTAGE INSTAGRAM - 1000 abonnés", "price": 1000, "category": "Abonnement" },
   { "title": "Netflix - 1 mois", "price": 2400, "category": "Abonnement" },
   { "title": "Netflix - 3 mois", "price": 7000, "category": "Abonnement" },
-  { "title": "Abonnement-IPTV-1mois", "price": 1500, "category": "Abonnement", "promo": true, "promo_end": "2025-07-31" },
+  {
+    "title": "Abonnement-IPTV-1mois",
+    "price": 1500,
+    "category": "Abonnement",
+    "promo": true,
+    "promo_end": "2025-07-31"
+  },
   { "title": "Abonnement-IPTV-3mois", "price": 8000, "category": "Abonnement" },
   { "title": "VPS 2GB RAM", "price": 2500, "category": "Abonnement" },
   { "title": "VPS 4GB RAM", "price": 4000, "category": "Abonnement" },
