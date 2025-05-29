@@ -59,7 +59,7 @@ async def avis(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if user.username == "deku225":  # change ici le username admin
+    if user.username == "@deku225":  # change ici le username admin
         await update.message.reply_text("Bienvenue admin.")
     else:
         await update.message.reply_text("Accès refusé.")
