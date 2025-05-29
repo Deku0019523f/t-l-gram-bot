@@ -47,7 +47,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         products = load_products()
         for i, p in enumerate(products):
             promo_label = "🔥 Promo " if p.get("promo") else ""
-            message = f"*{promo_label}{p['title']}*
+            message = f"*{promo_label}{p['title']}*"
 💰 Prix : {p['price']} FCFA"
             keyboard = [[InlineKeyboardButton("Commander", callback_data=f"order_{i}")]]
             await query.message.reply_text(message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
