@@ -1,118 +1,114 @@
-import os
-import json
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup
-)
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    filters, CallbackQueryHandler, ContextTypes
-)
+import json import datetime from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
-TOKEN = os.getenv("BOT_TOKEN")
+=== CONFIGURATION ===
 
-# Charger les produits depuis products.json au démarrage
-def load_products():
-    try:
-        with open("products.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"Erreur chargement products.json : {e}")
-        return []
+TOKEN = "TON_TOKEN_ICI" ADMIN_USERNAME = "deku225" PRODUCTS_FILE = "products.json"
 
+=== FONCTIONS UTILITAIRES ===
+
+def load_products(): with open(PRODUCTS_FILE, "r") as f: return json.load(f)
+
+def save_products(products): with open(PRODUCTS_FILE, "w") as f: json.dump(products, f, indent=2)
+
+=== MENU ADMIN ===
+
+async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE): user = update.effective_user if user.username != ADMIN_USERNAME: await update.message.reply_text("⛔ Accès refusé.") return
+
+keyboard = [
+    [InlineKeyboardButton("📤 Ajouter un produit", callback_data="admin_add")],
+    [InlineKeyboardButton("✏️ Modifier un produit", callback_data="admin_edit")],
+    [InlineKeyboardButton("🗑️ Supprimer un produit", callback_data="admin_delete")],
+    [InlineKeyboardButton("🔥 Activer/Désactiver promo", callback_data="admin_promo")]
+]
+reply_markup = InlineKeyboardMarkup(keyboard)
+await update.message.reply_text("🛠️ Menu Admin:", reply_markup=reply_markup)
+
+=== HANDLER DE CALLBACK ===
+
+async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE): query = update.callback_query await query.answer() action = query.data
+
+if action == "admin_add":
+    await query.message.reply_text("Envoyez les infos du produit au format :\n`Nom | Prix | Catégorie`", parse_mode="Markdown")
+    context.user_data["admin_action"] = "add"
+
+elif action == "admin_edit":
+    products = load_products()
+    msg = "✏️ *Produits existants :*\n"
+    for idx, p in enumerate(products):
+        msg += f"{idx}. {p['title']} - {p['price']} FCFA\n"
+    msg += "\nEnvoyez l'index + nouvelle info au format :\n`index | Nom | Prix | Catégorie`"
+    await query.message.reply_text(msg, parse_mode="Markdown")
+    context.user_data["admin_action"] = "edit"
+
+elif action == "admin_delete":
+    products = load_products()
+    msg = "🗑️ *Produits disponibles :*\n"
+    for idx, p in enumerate(products):
+        msg += f"{idx}. {p['title']} - {p['price']} FCFA\n"
+    msg += "\nEnvoyez simplement l'index du produit à supprimer."
+    await query.message.reply_text(msg, parse_mode="Markdown")
+    context.user_data["admin_action"] = "delete"
+
+elif action == "admin_promo":
+    products = load_products()
+    msg = "🔥 *Produits pour activer/désactiver une promo :*\n"
+    for idx, p in enumerate(products):
+        promo = "✅" if p.get("promo") else "❌"
+        msg += f"{idx}. {p['title']} - Promo: {promo}\n"
+    msg += "\nEnvoyez au format :\n`index | true/false | YYYY-MM-DD (optionnel)`"
+    await query.message.reply_text(msg, parse_mode="Markdown")
+    context.user_data["admin_action"] = "promo"
+
+=== TRAITEMENT DES RÉPONSES TEXTE ===
+
+async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE): if update.effective_user.username != ADMIN_USERNAME: return
+
+action = context.user_data.get("admin_action")
+text = update.message.text
 products = load_products()
 
-payment_numbers = {
-    "Wave": "+2250575719113",
-    "Orange": "+2250718623773",
-    "MTN": "+2250596430369"
-}
+try:
+    if action == "add":
+        nom, prix, cat = [x.strip() for x in text.split("|")]
+        products.append({"title": nom, "price": int(prix), "category": cat})
+        save_products(products)
+        await update.message.reply_text("✅ Produit ajouté !")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Bienvenue sur le bot boutique !\n"
-        "Tapez /produits pour voir la liste des produits."
-    )
+    elif action == "edit":
+        idx, nom, prix, cat = [x.strip() for x in text.split("|")]
+        products[int(idx)] = {"title": nom, "price": int(prix), "category": cat}
+        save_products(products)
+        await update.message.reply_text("✏️ Produit modifié.")
 
-async def produits(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not products:
-        await update.message.reply_text("Aucun produit disponible actuellement.")
-        return
+    elif action == "delete":
+        idx = int(text.strip())
+        deleted = products.pop(idx)
+        save_products(products)
+        await update.message.reply_text(f"🗑️ Produit supprimé: {deleted['title']}")
 
-    messages = []
-    for p in products:
-        promo_label = "🔥 Promo - " if p.get("promo", False) else ""
-        message = (
-            f"*{promo_label}{p['nom']}*\n"
-            f"ID: `{p['id']}`\n"
-            f"Prix: {p['prix']} FCFA\n"
-            f"{p.get('description', '')}"
-        )
-        messages.append(message)
+    elif action == "promo":
+        parts = [x.strip() for x in text.split("|")]
+        if len(parts) < 2:
+            await update.message.reply_text("⛔ Format invalide. Essayez : `index | true/false | date`", parse_mode="Markdown")
+            return
+        idx = int(parts[0])
+        status = parts[1].lower() == "true"
+        end_date = parts[2] if len(parts) == 3 else None
+        products[idx]["promo"] = status
+        products[idx]["promo_end"] = end_date
+        save_products(products)
+        await update.message.reply_text("🔥 Promo mise à jour.")
 
-    full_message = "\n\n".join(messages)
-    await update.message.reply_markdown(full_message)
+    context.user_data["admin_action"] = None
 
-async def avis(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Merci pour votre avis ! Envoyez-nous un message avec vos impressions."
-    )
+except Exception as e:
+    await update.message.reply_text(f"⚠️ Erreur : {e}")
 
-async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if user.username == "@deku225":  # change ici le username admin
-        await update.message.reply_text("Bienvenue admin.")
-    else:
-        await update.message.reply_text("Accès refusé.")
+=== DÉMARRAGE BOT ===
 
-async def commande(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    if len(args) != 3:
-        await update.message.reply_text("Usage : /commande <product_id> <moyen_paiement> <transaction_id>")
-        return
+app = Application.builder().token(TOKEN).build()
 
-    product_id, moyen_paiement, transaction_id = args
-    product = next((p for p in products if p["id"] == product_id), None)
+app.add_handler(CommandHandler("admin", admin_menu)) app.add_handler(CallbackQueryHandler(handle_admin_action, pattern="^admin_")) app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_text))
 
-    if not product:
-        await update.message.reply_text("Produit non trouvé.")
-        return
+print("🤖 Bot admin prêt !") app.run_polling()
 
-    if moyen_paiement not in payment_numbers:
-        await update.message.reply_text(f"Moyen de paiement invalide. Choisissez parmi: {', '.join(payment_numbers.keys())}")
-        return
-
-    from datetime import datetime
-    date = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-    payment_number = payment_numbers[moyen_paiement]
-
-    receipt = f"""🧾 *Reçu de Commande*
-Date : {date}
-Produit : {product['nom']}
-Prix : {product['prix']} FCFA
-Moyen de paiement : {moyen_paiement}
-Numéro : {payment_number}
-Transaction ID : {transaction_id}
-
-Merci pour votre achat !"""
-
-    await update.message.reply_markdown(receipt)
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    print(f"Update {update} caused error {context.error}")
-
-def main():
-    application = ApplicationBuilder().token(TOKEN).build()
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("produits", produits))
-    application.add_handler(CommandHandler("avis", avis))
-    application.add_handler(CommandHandler("admin", admin))
-    application.add_handler(CommandHandler("commande", commande))
-
-    application.add_error_handler(error_handler)
-
-    print("✅ Bot en ligne !")
-    application.run_polling()
-
-if __name__ == "__main__":
-    main()
