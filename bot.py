@@ -87,7 +87,7 @@ async def handle_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode="Markdown"
         )
         await context.bot.send_message(
-            chat_id=ADMIN_USERNAME,
+            unsername=ADMIN_USERNAME,
             text=f"📥 Nouvelle commande de {update.effective_user.full_name} (@{update.effective_user.username}):\n"
                  f"Produit : *{product}*\nTransaction ID : `{transaction_id}`",
             parse_mode="Markdown"
