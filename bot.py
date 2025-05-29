@@ -35,9 +35,12 @@ async def produits(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     for pid, p in products.items():
         promo_label = "🔥 Promo " if p.get("promo") else ""
-        message = f"*{promo_label}{p['nom']}*
-💰 Prix : {p['prix']} FCFA
-🆔 ID : `{p['id']}`"
+        message = (
+    f"*{promo_label}{p['nom']}*\n"
+    f"Prix : {p['prix']} FCFA\n"
+    f"ID : {p['id']}\n"
+    f"Description : {p['description']}"
+)
         keyboard = [[InlineKeyboardButton("Commander", callback_data=f"order_{pid}")]]
         await update.message.reply_markdown(message, reply_markup=InlineKeyboardMarkup(keyboard))
 
