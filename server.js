@@ -1,19 +1,22 @@
+// server.js
+
 import express from "express";
-import fetch from "node-fetch";
 import cors from "cors";
-import dotenv from "dotenv";
-dotenv.config();
+import fetch from "node-fetch";
 
 const app = express();
 const port = process.env.PORT || 8080;
 
+// Autoriser uniquement ton GitHub Pages
 app.use(cors({
-  origin: "https://deku0019523f.github.io/IA-image/"  // ✅ Autorise les requêtes venant de GitHub Pages
+  origin: "https://deku0019523f.github.io"
 }));
+
 app.use(express.json());
 
 app.post("/generate", async (req, res) => {
   const prompt = req.body.prompt;
+
   if (!prompt) {
     return res.status(400).json({ error: "Prompt manquant" });
   }
@@ -23,7 +26,7 @@ app.post("/generate", async (req, res) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
       },
       body: JSON.stringify({
         prompt,
@@ -33,13 +36,15 @@ app.post("/generate", async (req, res) => {
     });
 
     const data = await response.json();
-    if (data?.data?.[0]?.url) {
+
+    if (data && data.data && data.data[0]) {
       res.status(200).json({ image: data.data[0].url });
     } else {
-      res.status(500).json({ error: "Erreur de génération", details: data });
+      res.status(500).json({ error: "Erreur lors de la génération de l'image" });
     }
-  } catch (error) {
-    res.status(500).json({ error: "Erreur serveur", details: error.message });
+  } catch (err) {
+    console.error("Erreur API:", err);
+    res.status(500).json({ error: "Erreur serveur" });
   }
 });
 
