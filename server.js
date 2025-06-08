@@ -8,7 +8,7 @@ const app = express();
 const port = process.env.PORT || 8080;
 
 app.use(cors({
-  origin: "https://deku0019523f.github.io"  // ✅ Autorise les requêtes venant de GitHub Pages
+  origin: "https://deku0019523f.github.io/IA-image/"  // ✅ Autorise les requêtes venant de GitHub Pages
 }));
 app.use(express.json());
 
