@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const fetch = require('node-fetch');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -12,6 +11,8 @@ app.post('/generate', async (req, res) => {
   const prompt = req.body.prompt;
 
   try {
+    const fetch = (await import('node-fetch')).default;
+
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: {
@@ -26,6 +27,7 @@ app.post('/generate', async (req, res) => {
     });
 
     const data = await response.json();
+
     if (data && data.data && data.data[0]) {
       res.json({ image: data.data[0].url });
     } else {
