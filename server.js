@@ -1,13 +1,18 @@
-const express = require('express');
-const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
-const cors = require('cors');
+import express from 'express';
+import cors from 'cors';
+import fetch from 'node-fetch';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 8080;
 
-// ✅ Autoriser toutes les origines (ou restreindre à GitHub Pages uniquement)
+// ✅ Activer CORS pour GitHub Pages
 app.use(cors({
-  origin: 'https://deku0019523f.github.io', // Ou utiliser '*' si tu veux autoriser toutes
+  origin: 'https://deku0019523f.github.io', // <-- ton vrai domaine GitHub Pages
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(express.json());
@@ -36,16 +41,16 @@ app.post('/generate', async (req, res) => {
     const data = await response.json();
 
     if (data && data.data && data.data[0]) {
-      res.status(200).json({ image: data.data[0].url });
+      return res.status(200).json({ image: data.data[0].url });
     } else {
-      res.status(500).json({ error: 'Erreur lors de la génération d’image.' });
+      return res.status(500).json({ error: 'Réponse invalide de l’API OpenAI.' });
     }
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Erreur serveur.' });
+    console.error("Erreur serveur :", error);
+    return res.status(500).json({ error: 'Erreur serveur.' });
   }
 });
 
 app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
+  console.log(`✅ Serveur démarré sur le port ${port}`);
 });
